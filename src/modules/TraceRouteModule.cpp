@@ -268,6 +268,14 @@ void TraceRouteModule::alterReceivedProtobuf(meshtastic_MeshPacket &p, meshtasti
             handleTraceRouteResult(result);
         }
     }
+
+    // Forward passing traceroute packets to connected client (sniffer mode).
+    // isToUs() is false when this packet is routed through us, not to us.
+    if (!isToUs(&p)) {
+        meshtastic_MeshPacket *copy = packetPool.allocCopy(p);
+        if (copy)
+            service->sendToPhone(copy);
+    }
 }
 
 void TraceRouteModule::updateNextHops(const meshtastic_MeshPacket &p, meshtastic_RouteDiscovery *r)
