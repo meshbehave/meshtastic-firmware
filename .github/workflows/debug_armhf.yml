@@ -1,0 +1,43 @@
+name: Debug — armhf native build (self-hosted)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-armhf-native:
+    runs-on: [self-hosted, rpi-armhf]
+    env:
+      LD_LIBRARY_PATH: ""   # clear systemd-inherited SSL workaround; steps use system libssl
+
+    steps:
+      - name: System info
+        run: |
+          uname -a
+          openssl version
+          python3 --version
+          echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-<not set>}"
+
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y libbluetooth-dev libgpiod-dev libyaml-cpp-dev \
+            libssl-dev libulfius-dev liborcania-dev libusb-1.0-0-dev libi2c-dev libuv1-dev
+
+      - name: Build
+        run: |
+          python3 -m venv /tmp/pio-$$
+          /tmp/pio-$$/bin/pip install -q platformio
+          /tmp/pio-$$/bin/pio run -e native
+          rm -rf /tmp/pio-$$
+
+      - name: Rename binary
+        run: mv .pio/build/native/meshtasticd meshtasticd-armhf
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: meshtasticd-armhf
+          path: meshtasticd-armhf
