@@ -1,0 +1,90 @@
+name: Sync upstream & release sniffer
+
+# Fetches meshtastic/firmware:develop every 7 days, fast-forwards our develop
+# branch, rebases traceroute-sniffer on top, and pushes a unique dated tag
+# (vX.Y.Z-sniffer-YYYYMMDD) which triggers build_sniffers.yml.
+# Every build gets its own tag so any release can be rolled back to.
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'   # Every Monday, 03:00 UTC
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0          # full history needed for rebase
+          # Use PAT so the tag push triggers build_sniffers.yml.
+          # GITHUB_TOKEN pushes are blocked from triggering other workflows.
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote and fetch
+        run: |
+          git remote add upstream https://github.com/meshtastic/firmware.git
+          git fetch upstream --tags
+
+      - name: Fast-forward develop to upstream/develop
+        # Push upstream/develop directly — avoids ambiguous checkout when both
+        # origin/develop and upstream/develop exist as remote tracking branches.
+        run: git push origin upstream/develop:refs/heads/develop
+
+      - name: Rebase traceroute-sniffer onto upstream/develop
+        # actions/checkout already has traceroute-sniffer checked out (default branch).
+        run: git rebase upstream/develop
+
+      - name: Push rebased traceroute-sniffer
+        run: git push --force-with-lease origin traceroute-sniffer
+
+      - name: Build tag
+        id: tag
+        run: |
+          # Read the canonical version from metainfo.xml — upstream snapshot tags
+          # include a commit SHA (e.g. v2.7.19.bb3d6d5) and are unreliable for
+          # human-readable versioning. The XML is always kept current in develop.
+          UPSTREAM_VER="v$(grep -m1 '<release version=' bin/org.meshtastic.meshtasticd.metainfo.xml \
+            | sed 's/.*version="\([^"]*\)".*/\1/')"
+          BUILD_DATE=$(date -u +%Y%m%d)
+          SNIFFER_TAG="${UPSTREAM_VER}-sniffer-${BUILD_DATE}"
+          echo "value=${SNIFFER_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Check tag does not already exist
+        id: tag_check
+        run: |
+          TAG=${{ steps.tag.outputs.value }}
+          if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q "${TAG}"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Tag ${TAG} already exists (workflow re-run on same day?) — skipping build."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push tag (triggers build_sniffers.yml)
+        if: steps.tag_check.outputs.exists == 'false'
+        run: |
+          TAG=${{ steps.tag.outputs.value }}
+          git tag "${TAG}"
+          git push origin "${TAG}"
+
+      - name: Job summary
+        run: |
+          TAG=${{ steps.tag.outputs.value }}
+          echo "## Sync result" >> "$GITHUB_STEP_SUMMARY"
+          echo "| | |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Tag | \`${TAG}\` |" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.tag_check.outputs.exists }}" = "false" ]; then
+            echo "| Build triggered | yes |" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "| Build triggered | no — tag already exists (re-run on same day) |" >> "$GITHUB_STEP_SUMMARY"
+          fi
