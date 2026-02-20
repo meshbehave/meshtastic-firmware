@@ -1,0 +1,109 @@
+name: Build and release meshtasticd (traceroute-sniffer)
+
+on:
+  push:
+    tags:
+      - 'v*-sniffer'
+  workflow_dispatch:
+
+jobs:
+  build-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y libbluetooth-dev libgpiod-dev libyaml-cpp-dev \
+            libssl-dev libulfius-dev liborcania-dev libusb-1.0-0-dev libi2c-dev libuv1-dev
+
+      - name: Build
+        run: |
+          python3 -m venv /tmp/pio-$$
+          /tmp/pio-$$/bin/pip install -q platformio
+          /tmp/pio-$$/bin/pio run -e native
+          rm -rf /tmp/pio-$$
+
+      - name: Rename binary
+        run: mv .pio/build/native/meshtasticd meshtasticd-arm64
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: meshtasticd-arm64
+          path: meshtasticd-arm64
+
+  build-armhf:
+    runs-on: [self-hosted, rpi-armhf]
+    env:
+      LD_LIBRARY_PATH: ""   # clear systemd-inherited SSL workaround
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y libbluetooth-dev libgpiod-dev libyaml-cpp-dev \
+            libssl-dev libulfius-dev liborcania-dev libusb-1.0-0-dev libi2c-dev libuv1-dev
+
+      - name: Build
+        run: |
+          python3 -m venv /tmp/pio-$$
+          /tmp/pio-$$/bin/pip install -q platformio
+          /tmp/pio-$$/bin/pio run -e native
+          rm -rf /tmp/pio-$$
+
+      - name: Rename binary
+        run: mv .pio/build/native/meshtasticd meshtasticd-armhf
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: meshtasticd-armhf
+          path: meshtasticd-armhf
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-arm64, build-armhf]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2.5.0
+        with:
+          name: "traceroute-sniffer ${{ github.ref_name }}"
+          files: |
+            meshtasticd-arm64
+            meshtasticd-armhf
+          body: |
+            Patched `meshtasticd` — forwards all traceroute packets passing
+            through your node to connected clients (sniffer mode).
+            One ~5-line change in `TraceRouteModule::alterReceivedProtobuf()`.
+
+            **Tag:** `${{ github.ref_name }}`
+            **Commit:** ${{ github.sha }}
+
+            | Binary | Target |
+            |--------|--------|
+            | `meshtasticd-arm64` | RPi 3/4/5 — 64-bit Raspberry Pi OS / Ubuntu arm64 |
+            | `meshtasticd-armhf` | RPi 2/3/4 — Raspbian / 32-bit Debian armhf |
+
+            ## Usage
+            ```bash
+            sudo systemctl stop meshtasticd.service
+            sudo ./meshtasticd-armhf \
+              -c /etc/meshtasticd/config.yaml \
+              --fsdir /var/lib/meshtasticd/.portduino/default
+
+            # Restore official daemon when done:
+            sudo systemctl start meshtasticd.service
+            ```
