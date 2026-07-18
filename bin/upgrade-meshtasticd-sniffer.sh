@@ -37,8 +37,11 @@ FORCE_INSTALL=0
 SKIP_LDD=0
 HEALTH_TIMEOUT_SEC="${HEALTH_TIMEOUT_SEC:-30}"
 
-log()  { printf '%s\n' "$*"; }
-info() { printf '==> %s\n' "$*"; }
+# All human-readable output goes to stderr so command substitutions like
+#   newbin=$(download_and_verify ...)
+# only capture the returned path on stdout.
+log()  { printf '%s\n' "$*" >&2; }
+info() { printf '==> %s\n' "$*" >&2; }
 warn() { printf 'WARNING: %s\n' "$*" >&2; }
 die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
@@ -297,10 +300,9 @@ download_and_verify() {
   if command -v ldd >/dev/null 2>&1; then
     info "Shared library check (ldd)"
     if ! ldd "$newbin" >"${WORKDIR}/ldd.txt" 2>&1; then
-      # static or unusual — show output
-      cat "${WORKDIR}/ldd.txt" || true
+      cat "${WORKDIR}/ldd.txt" >&2 || true
     else
-      cat "${WORKDIR}/ldd.txt"
+      cat "${WORKDIR}/ldd.txt" >&2
     fi
     if grep -q 'not found' "${WORKDIR}/ldd.txt" 2>/dev/null; then
       if [[ "$SKIP_LDD" -eq 1 ]]; then
@@ -317,6 +319,7 @@ download_and_verify() {
   [[ -n "$ver" ]] || die "new binary did not print --version"
   log "$ver"
 
+  # stdout: path only (consumed by callers)
   printf '%s\n' "$newbin"
 }
 
@@ -454,7 +457,11 @@ main_upgrade() {
   fi
 
   confirm_apply
-  backup=$(backup_current || true)
+  backup=$(backup_current 2>/dev/null || backup_current || true)
+  # backup_current logs on stderr; capture only last line path if mixed — re-run path extraction
+  if [[ -L "${BACKUP_DIR}/meshtasticd.prev" || -e "${BACKUP_DIR}/meshtasticd.prev" ]]; then
+    backup=$(readlink -f "${BACKUP_DIR}/meshtasticd.prev" 2>/dev/null || true)
+  fi
   stop_service
   # On first install, if divert missing and --force-install, seed .official if a stock binary existed
   if [[ "$FORCE_INSTALL" -eq 1 ]] && command -v dpkg-divert >/dev/null 2>&1; then
