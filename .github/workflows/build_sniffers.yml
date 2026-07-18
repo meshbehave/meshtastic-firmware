@@ -36,31 +36,30 @@ jobs:
           name: meshtasticd-arm64
           path: meshtasticd-arm64
 
+  # armhf is built *on* a real 32-bit host, but the GHA job runs on a supported
+  # arm64 self-hosted runner (jump host) and SSHes out. Host is NOT hardcoded —
+  # set repository variable ARMHF_BUILD_HOST (e.g. an SSH Host alias).
   build-armhf:
-    runs-on: [self-hosted, rpi-armhf]
-    env:
-      LD_LIBRARY_PATH: ""   # clear systemd-inherited SSL workaround
+    runs-on: [self-hosted, Linux, ARM64]
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
 
-      - name: Install build deps
+      - name: Require ARMHF_BUILD_HOST
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y libbluetooth-dev libgpiod-dev libyaml-cpp-dev \
-            libjsoncpp-dev libssl-dev libulfius-dev liborcania-dev \
-            libusb-1.0-0-dev libi2c-dev libuv1-dev
+          if [ -z "${{ vars.ARMHF_BUILD_HOST }}" ]; then
+            echo "::error::Set repository variable ARMHF_BUILD_HOST (SSH destination for the armhf build host). Do not hardcode the hostname in this workflow."
+            exit 1
+          fi
+          echo "ARMHF_BUILD_HOST is configured (value redacted from logs if sensitive; length=${#HOST})"
+        env:
+          HOST: ${{ vars.ARMHF_BUILD_HOST }}
 
-      - name: Build
-        run: |
-          python3 -m venv /tmp/pio-$$
-          /tmp/pio-$$/bin/pip install -q platformio
-          /tmp/pio-$$/bin/pio run -e native
-          rm -rf /tmp/pio-$$
-
-      - name: Rename binary
-        run: mv .pio/build/native/meshtasticd meshtasticd-armhf
+      - name: Remote native armhf build (via SSH)
+        env:
+          ARMHF_BUILD_HOST: ${{ vars.ARMHF_BUILD_HOST }}
+        run: ./bin/ci/build-meshtasticd-armhf-remote.sh
 
       - uses: actions/upload-artifact@v6
         with:
