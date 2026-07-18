@@ -1,42 +1,39 @@
-name: Debug — armhf native build (self-hosted)
+name: Debug — armhf native build (via arm64 runner + SSH)
 
 on:
   workflow_dispatch:
 
+# Job runs on a supported arm64 self-hosted runner and builds natively on a
+# remote armhf host over SSH. Set repository variable ARMHF_BUILD_HOST.
 jobs:
   build-armhf-native:
-    runs-on: [self-hosted, rpi-armhf]
-    env:
-      LD_LIBRARY_PATH: ""   # clear systemd-inherited SSL workaround; steps use system libssl
-
+    runs-on: [self-hosted, Linux, ARM64]
     steps:
-      - name: System info
+      - name: Jump-host system info
         run: |
           uname -a
+          echo "runner_arch=$(uname -m) dpkg=$(dpkg --print-architecture 2>/dev/null || true)"
           openssl version
           python3 --version
-          echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-<not set>}"
 
       - uses: actions/checkout@v6
         with:
           submodules: recursive
 
-      - name: Install build deps
+      - name: Require ARMHF_BUILD_HOST
+        env:
+          HOST: ${{ vars.ARMHF_BUILD_HOST }}
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y libbluetooth-dev libgpiod-dev libyaml-cpp-dev \
-            libjsoncpp-dev libssl-dev libulfius-dev liborcania-dev \
-            libusb-1.0-0-dev libi2c-dev libuv1-dev
+          if [ -z "$HOST" ]; then
+            echo "::error::Set repository variable ARMHF_BUILD_HOST (SSH destination)."
+            exit 1
+          fi
+          echo "ARMHF_BUILD_HOST configured (length=${#HOST})"
 
-      - name: Build
-        run: |
-          python3 -m venv /tmp/pio-$$
-          /tmp/pio-$$/bin/pip install -q platformio
-          /tmp/pio-$$/bin/pio run -e native
-          rm -rf /tmp/pio-$$
-
-      - name: Rename binary
-        run: mv .pio/build/native/meshtasticd meshtasticd-armhf
+      - name: Remote native armhf build (via SSH)
+        env:
+          ARMHF_BUILD_HOST: ${{ vars.ARMHF_BUILD_HOST }}
+        run: ./bin/ci/build-meshtasticd-armhf-remote.sh
 
       - uses: actions/upload-artifact@v6
         with:
