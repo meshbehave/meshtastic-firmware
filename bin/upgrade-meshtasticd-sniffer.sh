@@ -457,11 +457,7 @@ main_upgrade() {
   fi
 
   confirm_apply
-  backup=$(backup_current 2>/dev/null || backup_current || true)
-  # backup_current logs on stderr; capture only last line path if mixed — re-run path extraction
-  if [[ -L "${BACKUP_DIR}/meshtasticd.prev" || -e "${BACKUP_DIR}/meshtasticd.prev" ]]; then
-    backup=$(readlink -f "${BACKUP_DIR}/meshtasticd.prev" 2>/dev/null || true)
-  fi
+  backup=$(backup_current || true)
   stop_service
   # On first install, if divert missing and --force-install, seed .official if a stock binary existed
   if [[ "$FORCE_INSTALL" -eq 1 ]] && command -v dpkg-divert >/dev/null 2>&1; then
