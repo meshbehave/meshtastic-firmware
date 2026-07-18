@@ -78,8 +78,11 @@ esac
 echo "PREFLIGHT_OK: remote host is armhf"
 REMOTE
 
+echo "==> Ensure remote workdir exists: ~/${REMOTE_DIR}"
+# REMOTE_DIR is relative to remote $HOME; create parents (rsync will not mkdir -p).
+"${SSH[@]}" "$HOST" "mkdir -p \"\${HOME}/${REMOTE_DIR}\""
+
 echo "==> Sync sources -> ${HOST}:${REMOTE_DIR}/"
-# shellcheck disable=SC2086
 "${RSYNC[@]}" ./ "${HOST}:${REMOTE_DIR}/"
 
 echo "==> Native armhf build on remote (venv + pio on disk, not /tmp tmpfs)"
